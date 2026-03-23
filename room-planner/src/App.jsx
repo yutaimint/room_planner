@@ -4,8 +4,9 @@ const TATAMI_M2 = 1.62;
 
 const PRESET_FURNITURE = [
   { name: "ベッド (シングル)", w: 100, h: 200, color: "#5B8C5A" },
-  { name: "ベッド (ダブル)", w: 140, h: 200, color: "#5B8C5A" },
-  { name: "デスク", w: 120, h: 60, color: "#8B6F47" },
+  { name: "ベッド (セミ)", w: 120, h: 200, color: "#5B8C5A" },
+  { name: "デスク", w: 70, h: 140, color: "#8B6F47" },
+  { name: "チェア", w: 66, h: 100, color: "#A0522D" },
   { name: "ソファ", w: 180, h: 80, color: "#7A6B8E" },
   { name: "テーブル", w: 80, h: 80, color: "#B8860B" },
   { name: "本棚", w: 90, h: 30, color: "#6B4226" },
@@ -20,8 +21,10 @@ function uid() {
 }
 
 export default function RoomPlanner() {
-  const [roomW, setRoomW] = useState(360);
-  const [roomH, setRoomH] = useState(360);
+  const [roomWStr, setRoomWStr] = useState("360");
+  const [roomHStr, setRoomHStr] = useState("360");
+  const roomW = Math.max(1, Number(roomWStr) || 1);
+  const roomH = Math.max(1, Number(roomHStr) || 1);
   const [furniture, setFurniture] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [roomRotation, setRoomRotation] = useState(0);
@@ -36,6 +39,46 @@ export default function RoomPlanner() {
   const [dragging, setDragging] = useState(null);
   const canvasRef = useRef(null);
   const roomAreaRef = useRef(null);
+  const bgFileRef = useRef(null);
+
+  // background image state
+  const [bgImage, setBgImage] = useState(null);
+  const [bgNaturalW, setBgNaturalW] = useState(0);
+  const [bgNaturalH, setBgNaturalH] = useState(0);
+  const [bgScale, setBgScale] = useState(100); // percentage
+
+  const loadBgImage = (file) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        setBgNaturalW(img.width);
+        setBgNaturalH(img.height);
+        setBgImage(ev.target.result);
+        setBgScale(100);
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Paste handler for background image
+  useEffect(() => {
+    const handler = (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          loadBgImage(item.getAsFile());
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste", handler);
+    return () => window.removeEventListener("paste", handler);
+  }, []);
 
   const sqm = ((roomW * roomH) / 10000).toFixed(2);
   const tatami = ((roomW * roomH) / 10000 / TATAMI_M2).toFixed(1);
@@ -250,12 +293,13 @@ export default function RoomPlanner() {
 
   return (
     <div style={{
-      minHeight: "100vh",
+      height: "100vh",
       background: "#0B1120",
       color: "#C5D0E6",
       fontFamily: "'DM Sans', 'Noto Sans JP', sans-serif",
       display: "flex",
       flexDirection: "column",
+      overflow: "hidden",
     }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
 
@@ -282,7 +326,7 @@ export default function RoomPlanner() {
         </div>
       </header>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <div style={{ display: "flex", flex: 1, overflow: "hidden", minHeight: 0 }}>
         {/* Sidebar */}
         <aside style={{
           width: 300, minWidth: 300,
@@ -290,15 +334,13 @@ export default function RoomPlanner() {
           borderRight: "1px solid #1E2A42",
           overflowY: "auto",
           padding: "0",
-          display: "flex",
-          flexDirection: "column",
         }}>
           {/* Room Size */}
           <div style={{ padding: "20px 20px 16px" }}>
             <SectionTitle>部屋のサイズ</SectionTitle>
             <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-              <InputField label="幅 (cm)" value={roomW} onChange={(v) => setRoomW(Math.max(50, Number(v) || 0))} />
-              <InputField label="奥行 (cm)" value={roomH} onChange={(v) => setRoomH(Math.max(50, Number(v) || 0))} />
+              <InputField label="幅 (cm)" value={roomWStr} onChange={(v) => setRoomWStr(v)} />
+              <InputField label="奥行 (cm)" value={roomHStr} onChange={(v) => setRoomHStr(v)} />
             </div>
             <div style={{
               display: "flex", gap: 8, marginTop: 8,
@@ -332,6 +374,68 @@ export default function RoomPlanner() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <Divider />
+
+          {/* Background Image */}
+          <div style={{ padding: "16px 20px" }}>
+            <SectionTitle>背景画像 (間取り図)</SectionTitle>
+            <p style={{ fontSize: 11, color: "#6B7A99", marginBottom: 10, lineHeight: 1.5 }}>
+              画像をペーストするか、ファイルを選択してください
+            </p>
+            <input
+              ref={bgFileRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                if (e.target.files?.[0]) loadBgImage(e.target.files[0]);
+              }}
+            />
+            <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+              <button
+                onClick={() => bgFileRef.current?.click()}
+                style={{
+                  flex: 1, padding: "8px 0", borderRadius: 6,
+                  border: "1px solid #1E2A42", background: "#111B2E",
+                  color: "#C5D0E6", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", transition: "all 0.15s",
+                  fontFamily: "'DM Sans', 'Noto Sans JP', sans-serif",
+                }}
+              >
+                📁 ファイル選択
+              </button>
+              {bgImage && (
+                <button
+                  onClick={() => { setBgImage(null); setBgScale(100); }}
+                  style={{
+                    padding: "8px 12px", borderRadius: 6,
+                    border: "1px solid #7F1D1D", background: "#111B2E",
+                    color: "#FCA5A5", fontSize: 12, fontWeight: 600,
+                    cursor: "pointer", transition: "all 0.15s",
+                    fontFamily: "'DM Sans', sans-serif",
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {bgImage && (
+              <div>
+                <label style={{ fontSize: 10, color: "#6B7A99", display: "block", marginBottom: 4 }}>
+                  サイズ: {bgScale}%
+                </label>
+                <input
+                  type="range"
+                  min={10}
+                  max={300}
+                  value={bgScale}
+                  onChange={(e) => setBgScale(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: "#3B82F6" }}
+                />
+              </div>
+            )}
           </div>
 
           <Divider />
@@ -441,7 +545,7 @@ export default function RoomPlanner() {
 
           {/* Furniture List */}
           {furniture.length > 0 && (
-            <div style={{ padding: "16px 20px", flex: 1 }}>
+            <div style={{ padding: "16px 20px" }}>
               <SectionTitle>配置済み家具 ({furniture.length})</SectionTitle>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {furniture.map((f) => (
@@ -467,6 +571,7 @@ export default function RoomPlanner() {
               </div>
             </div>
           )}
+          <div style={{ height: 20, flexShrink: 0 }} />
         </aside>
 
         {/* Canvas Area */}
@@ -516,11 +621,30 @@ export default function RoomPlanner() {
                 overflow: "hidden",
               }}
             >
+              {/* Background image */}
+              {bgImage && bgNaturalW > 0 && (
+                <img
+                  src={bgImage}
+                  alt=""
+                  draggable={false}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: scaledRoomW * (bgScale / 100),
+                    height: scaledRoomW * (bgScale / 100) * (bgNaturalH / bgNaturalW),
+                    opacity: 0.4,
+                    pointerEvents: "none",
+                    objectFit: "contain",
+                    zIndex: 1,
+                  }}
+                />
+              )}
               {/* Grid */}
               <svg
                 width={scaledRoomW}
                 height={scaledRoomH}
-                style={{ position: "absolute", top: 0, left: 0 }}
+                style={{ position: "absolute", top: 0, left: 0, zIndex: 2 }}
               >
                 {Array.from({ length: Math.floor(roomW / gridSpacingCm) + 1 }, (_, i) => (
                   <line
