@@ -46,6 +46,15 @@ export default function RoomPlanner() {
   const [bgNaturalW, setBgNaturalW] = useState(0);
   const [bgNaturalH, setBgNaturalH] = useState(0);
   const [bgScale, setBgScale] = useState(100); // percentage
+  const [bgX, setBgX] = useState(0); // bg position in canvas px
+  const [bgY, setBgY] = useState(0);
+  const [draggingBg, setDraggingBg] = useState(null);
+
+  // zoom
+  const [zoom, setZoom] = useState(100);
+
+  // grid mode: "m2" or "tatami"
+  const [gridMode, setGridMode] = useState("m2");
 
   const loadBgImage = (file) => {
     if (!file || !file.type.startsWith("image/")) return;
@@ -57,6 +66,8 @@ export default function RoomPlanner() {
         setBgNaturalH(img.height);
         setBgImage(ev.target.result);
         setBgScale(100);
+        setBgX(0);
+        setBgY(0);
       };
       img.src = ev.target.result;
     };
@@ -289,7 +300,41 @@ export default function RoomPlanner() {
   const gridSpacingCm = maxDim > 600 ? 100 : 50;
   const gridSpacingPx = gridSpacingCm * scale;
 
+  // Tatami grid: 90cm x 180cm (standard)
+  const tatamiWCm = 90;
+  const tatamiHCm = 180;
+  const tatamiWPx = tatamiWCm * scale;
+  const tatamiHPx = tatamiHCm * scale;
+
   const selectedItem = furniture.find((f) => f.id === selectedId);
+
+  // Background image drag handlers
+  const handleBgMouseDown = useCallback((e) => {
+    e.stopPropagation();
+    setSelectedId(null);
+    setDraggingBg({ startX: e.clientX - bgX, startY: e.clientY - bgY });
+  }, [bgX, bgY]);
+
+  const handleBgMouseMove = useCallback((e) => {
+    if (!draggingBg) return;
+    setBgX(e.clientX - draggingBg.startX);
+    setBgY(e.clientY - draggingBg.startY);
+  }, [draggingBg]);
+
+  const handleBgMouseUp = useCallback(() => {
+    setDraggingBg(null);
+  }, []);
+
+  useEffect(() => {
+    if (draggingBg) {
+      window.addEventListener("mousemove", handleBgMouseMove);
+      window.addEventListener("mouseup", handleBgMouseUp);
+      return () => {
+        window.removeEventListener("mousemove", handleBgMouseMove);
+        window.removeEventListener("mouseup", handleBgMouseUp);
+      };
+    }
+  }, [draggingBg, handleBgMouseMove, handleBgMouseUp]);
 
   return (
     <div style={{
@@ -378,6 +423,35 @@ export default function RoomPlanner() {
 
           <Divider />
 
+          {/* Grid Mode */}
+          <div style={{ padding: "16px 20px" }}>
+            <SectionTitle>グリッド表示</SectionTitle>
+            <div style={{ display: "flex", gap: 6 }}>
+              {[
+                { key: "m2", label: "m² (1m)" },
+                { key: "tatami", label: "畳" },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  onClick={() => setGridMode(mode.key)}
+                  style={{
+                    flex: 1, padding: "8px 0", borderRadius: 6,
+                    border: gridMode === mode.key ? "1.5px solid #3B82F6" : "1px solid #1E2A42",
+                    background: gridMode === mode.key ? "#1A2744" : "#111B2E",
+                    color: gridMode === mode.key ? "#60A5FA" : "#6B7A99",
+                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    fontFamily: "'DM Mono', monospace",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {mode.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <Divider />
+
           {/* Background Image */}
           <div style={{ padding: "16px 20px" }}>
             <SectionTitle>背景画像 (間取り図)</SectionTitle>
@@ -408,7 +482,7 @@ export default function RoomPlanner() {
               </button>
               {bgImage && (
                 <button
-                  onClick={() => { setBgImage(null); setBgScale(100); }}
+                  onClick={() => { setBgImage(null); setBgScale(100); setBgX(0); setBgY(0); }}
                   style={{
                     padding: "8px 12px", borderRadius: 6,
                     border: "1px solid #7F1D1D", background: "#111B2E",
@@ -596,149 +670,235 @@ export default function RoomPlanner() {
             opacity: 0.5,
           }} />
 
-          {/* Room container with rotation */}
-          <div
-            style={{
-              width: CANVAS_SIZE,
-              height: CANVAS_SIZE,
-              position: "relative",
-              transform: `rotate(${roomRotation}deg)`,
-              transition: "transform 0.5s cubic-bezier(0.4,0,0.2,1)",
-            }}
-          >
-            {/* Room rect */}
+          {/* Zoom wrapper */}
+          <div style={{
+            transform: `scale(${zoom / 100})`,
+            transition: "transform 0.2s ease",
+            position: "relative",
+          }}>
+            {/* Background image - independent of room, draggable */}
+            {bgImage && bgNaturalW > 0 && (
+              <img
+                src={bgImage}
+                alt=""
+                draggable={false}
+                onMouseDown={handleBgMouseDown}
+                style={{
+                  position: "absolute",
+                  left: bgX,
+                  top: bgY,
+                  width: CANVAS_SIZE * (bgScale / 100),
+                  height: CANVAS_SIZE * (bgScale / 100) * (bgNaturalH / bgNaturalW),
+                  opacity: 0.4,
+                  cursor: draggingBg ? "grabbing" : "grab",
+                  zIndex: 1,
+                  userSelect: "none",
+                }}
+              />
+            )}
+
+            {/* Room container with rotation */}
             <div
-              ref={roomAreaRef}
               style={{
-                position: "absolute",
-                left: roomOffsetX,
-                top: roomOffsetY,
-                width: scaledRoomW,
-                height: scaledRoomH,
-                background: "#111B2E",
-                border: "2px solid #3B82F6",
-                borderRadius: 2,
-                overflow: "hidden",
+                width: CANVAS_SIZE,
+                height: CANVAS_SIZE,
+                position: "relative",
+                transform: `rotate(${roomRotation}deg)`,
+                transition: "transform 0.5s cubic-bezier(0.4,0,0.2,1)",
+                zIndex: 2,
               }}
             >
-              {/* Background image */}
-              {bgImage && bgNaturalW > 0 && (
-                <img
-                  src={bgImage}
-                  alt=""
-                  draggable={false}
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    width: scaledRoomW * (bgScale / 100),
-                    height: scaledRoomW * (bgScale / 100) * (bgNaturalH / bgNaturalW),
-                    opacity: 0.4,
-                    pointerEvents: "none",
-                    objectFit: "contain",
-                    zIndex: 1,
-                  }}
-                />
-              )}
-              {/* Grid */}
-              <svg
-                width={scaledRoomW}
-                height={scaledRoomH}
-                style={{ position: "absolute", top: 0, left: 0, zIndex: 2 }}
+              {/* Room rect */}
+              <div
+                ref={roomAreaRef}
+                style={{
+                  position: "absolute",
+                  left: roomOffsetX,
+                  top: roomOffsetY,
+                  width: scaledRoomW,
+                  height: scaledRoomH,
+                  background: "#111B2E88",
+                  border: "2px solid #3B82F6",
+                  borderRadius: 2,
+                  overflow: "hidden",
+                }}
               >
-                {Array.from({ length: Math.floor(roomW / gridSpacingCm) + 1 }, (_, i) => (
-                  <line
-                    key={`v${i}`}
-                    x1={i * gridSpacingPx}
-                    y1={0}
-                    x2={i * gridSpacingPx}
-                    y2={scaledRoomH}
-                    stroke="#1E2A42"
-                    strokeWidth={1}
-                    strokeDasharray={i === 0 ? "none" : "2 4"}
-                  />
-                ))}
-                {Array.from({ length: Math.floor(roomH / gridSpacingCm) + 1 }, (_, i) => (
-                  <line
-                    key={`h${i}`}
-                    x1={0}
-                    y1={i * gridSpacingPx}
-                    x2={scaledRoomW}
-                    y2={i * gridSpacingPx}
-                    stroke="#1E2A42"
-                    strokeWidth={1}
-                    strokeDasharray={i === 0 ? "none" : "2 4"}
-                  />
-                ))}
-              </svg>
+                {/* Grid */}
+                <svg
+                  width={scaledRoomW}
+                  height={scaledRoomH}
+                  style={{ position: "absolute", top: 0, left: 0, zIndex: 2 }}
+                >
+                  {gridMode === "m2" ? (
+                    <>
+                      {Array.from({ length: Math.floor(roomW / gridSpacingCm) + 1 }, (_, i) => (
+                        <line
+                          key={`v${i}`}
+                          x1={i * gridSpacingPx} y1={0}
+                          x2={i * gridSpacingPx} y2={scaledRoomH}
+                          stroke="#1E2A42" strokeWidth={1}
+                          strokeDasharray={i === 0 ? "none" : "2 4"}
+                        />
+                      ))}
+                      {Array.from({ length: Math.floor(roomH / gridSpacingCm) + 1 }, (_, i) => (
+                        <line
+                          key={`h${i}`}
+                          x1={0} y1={i * gridSpacingPx}
+                          x2={scaledRoomW} y2={i * gridSpacingPx}
+                          stroke="#1E2A42" strokeWidth={1}
+                          strokeDasharray={i === 0 ? "none" : "2 4"}
+                        />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {/* Tatami grid: 90cm x 180cm rectangles */}
+                      {Array.from({ length: Math.floor(roomW / tatamiWCm) + 1 }, (_, i) => (
+                        <line
+                          key={`tv${i}`}
+                          x1={i * tatamiWPx} y1={0}
+                          x2={i * tatamiWPx} y2={scaledRoomH}
+                          stroke="#3B82F630" strokeWidth={1.5}
+                        />
+                      ))}
+                      {Array.from({ length: Math.floor(roomH / tatamiHCm) + 1 }, (_, i) => (
+                        <line
+                          key={`th${i}`}
+                          x1={0} y1={i * tatamiHPx}
+                          x2={scaledRoomW} y2={i * tatamiHPx}
+                          stroke="#3B82F630" strokeWidth={1.5}
+                        />
+                      ))}
+                      {/* Tatami labels */}
+                      {Array.from({ length: Math.floor(roomW / tatamiWCm) }, (_, col) =>
+                        Array.from({ length: Math.floor(roomH / tatamiHCm) }, (_, row) => (
+                          <text
+                            key={`tl${col}-${row}`}
+                            x={col * tatamiWPx + tatamiWPx / 2}
+                            y={row * tatamiHPx + tatamiHPx / 2}
+                            fill="#3B82F640"
+                            fontSize={10}
+                            textAnchor="middle"
+                            dominantBaseline="central"
+                            fontFamily="'DM Mono', monospace"
+                          >
+                            畳
+                          </text>
+                        ))
+                      )}
+                    </>
+                  )}
+                </svg>
 
-              {/* Dimension labels */}
-              <div style={{
-                position: "absolute", bottom: -22, left: "50%", transform: `translateX(-50%) rotate(${-roomRotation}deg)`,
-                fontSize: 11, color: "#3B82F6", fontFamily: "'DM Mono', monospace",
-                whiteSpace: "nowrap",
-              }}>
-                {roomW} cm
-              </div>
-              <div style={{
-                position: "absolute", right: -42, top: "50%", transform: `translateY(-50%) rotate(${-roomRotation}deg)`,
-                fontSize: 11, color: "#3B82F6", fontFamily: "'DM Mono', monospace",
-                whiteSpace: "nowrap",
-              }}>
-                {roomH} cm
-              </div>
+                {/* Dimension labels */}
+                <div style={{
+                  position: "absolute", bottom: -22, left: "50%", transform: `translateX(-50%) rotate(${-roomRotation}deg)`,
+                  fontSize: 11, color: "#3B82F6", fontFamily: "'DM Mono', monospace",
+                  whiteSpace: "nowrap",
+                }}>
+                  {roomW} cm
+                </div>
+                <div style={{
+                  position: "absolute", right: -42, top: "50%", transform: `translateY(-50%) rotate(${-roomRotation}deg)`,
+                  fontSize: 11, color: "#3B82F6", fontFamily: "'DM Mono', monospace",
+                  whiteSpace: "nowrap",
+                }}>
+                  {roomH} cm
+                </div>
 
-              {/* Furniture items */}
-              {furniture.map((f) => {
-                const fw = f.w * scale;
-                const fh = f.h * scale;
-                const isSelected = selectedId === f.id;
-                return (
-                  <div
-                    key={f.id}
-                    onMouseDown={(e) => handleMouseDown(e, f.id)}
-                    onTouchStart={(e) => handleTouchStart(e, f.id)}
-                    onClick={(e) => { e.stopPropagation(); setSelectedId(f.id); }}
-                    style={{
-                      position: "absolute",
-                      left: f.x * scale,
-                      top: f.y * scale,
-                      width: fw,
-                      height: fh,
-                      transform: `rotate(${f.rotation}deg)`,
-                      transformOrigin: "center center",
-                      background: f.color + "CC",
-                      border: isSelected ? "2px solid #FCD34D" : "1.5px solid " + f.color,
-                      borderRadius: 3,
-                      cursor: dragging?.id === f.id ? "grabbing" : "grab",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      userSelect: "none",
-                      zIndex: isSelected ? 20 : 10,
-                      boxShadow: isSelected ? "0 0 12px #FCD34D44" : "0 2px 8px #00000040",
-                      transition: dragging?.id === f.id ? "none" : "box-shadow 0.2s",
-                    }}
-                  >
-                    <span style={{
-                      fontSize: Math.min(fw, fh) < 40 ? 8 : 10,
-                      color: "#fff",
-                      textAlign: "center",
-                      lineHeight: 1.2,
-                      padding: 2,
-                      textShadow: "0 1px 3px #00000080",
-                      overflow: "hidden",
-                      fontWeight: 600,
-                      transform: `rotate(${-f.rotation}deg)`,
-                      maxWidth: "90%",
-                      pointerEvents: "none",
-                    }}>
-                      {f.name}
-                    </span>
-                  </div>
-                );
-              })}
+                {/* Furniture items */}
+                {furniture.map((f) => {
+                  const fw = f.w * scale;
+                  const fh = f.h * scale;
+                  const isSelected = selectedId === f.id;
+                  return (
+                    <div
+                      key={f.id}
+                      onMouseDown={(e) => handleMouseDown(e, f.id)}
+                      onTouchStart={(e) => handleTouchStart(e, f.id)}
+                      onClick={(e) => { e.stopPropagation(); setSelectedId(f.id); }}
+                      style={{
+                        position: "absolute",
+                        left: f.x * scale,
+                        top: f.y * scale,
+                        width: fw,
+                        height: fh,
+                        transform: `rotate(${f.rotation}deg)`,
+                        transformOrigin: "center center",
+                        background: f.color + "CC",
+                        border: isSelected ? "2px solid #FCD34D" : "1.5px solid " + f.color,
+                        borderRadius: 3,
+                        cursor: dragging?.id === f.id ? "grabbing" : "grab",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        userSelect: "none",
+                        zIndex: isSelected ? 20 : 10,
+                        boxShadow: isSelected ? "0 0 12px #FCD34D44" : "0 2px 8px #00000040",
+                        transition: dragging?.id === f.id ? "none" : "box-shadow 0.2s",
+                      }}
+                    >
+                      <span style={{
+                        fontSize: Math.min(fw, fh) < 40 ? 8 : 10,
+                        color: "#fff",
+                        textAlign: "center",
+                        lineHeight: 1.2,
+                        padding: 2,
+                        textShadow: "0 1px 3px #00000080",
+                        overflow: "hidden",
+                        fontWeight: 600,
+                        transform: `rotate(${-f.rotation}deg)`,
+                        maxWidth: "90%",
+                        pointerEvents: "none",
+                      }}>
+                        {f.name}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
+          </div>
+
+          {/* Zoom slider - right side */}
+          <div style={{
+            position: "absolute", right: 20, top: "50%", transform: "translateY(-50%)",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+            background: "#0D1424E0",
+            border: "1px solid #1E2A42",
+            borderRadius: 8, padding: "14px 10px",
+            backdropFilter: "blur(8px)",
+            zIndex: 30,
+          }}>
+            <span style={{ fontSize: 10, color: "#6B7A99", fontFamily: "'DM Mono', monospace" }}>
+              {zoom}%
+            </span>
+            <input
+              type="range"
+              min={25}
+              max={300}
+              value={zoom}
+              onChange={(e) => setZoom(Number(e.target.value))}
+              style={{
+                writingMode: "vertical-lr",
+                direction: "rtl",
+                height: 160,
+                width: 20,
+                accentColor: "#3B82F6",
+                cursor: "pointer",
+              }}
+            />
+            <button
+              onClick={() => setZoom(100)}
+              style={{
+                padding: "4px 8px", borderRadius: 4,
+                border: "1px solid #1E2A42", background: "#111B2E",
+                color: "#6B7A99", fontSize: 10, cursor: "pointer",
+                fontFamily: "'DM Mono', monospace",
+              }}
+            >
+              1:1
+            </button>
           </div>
 
           {/* Room info overlay */}
@@ -750,20 +910,22 @@ export default function RoomPlanner() {
             fontSize: 12, fontFamily: "'DM Mono', monospace",
             color: "#6B7A99",
             backdropFilter: "blur(8px)",
+            zIndex: 30,
           }}>
-            {roomW}×{roomH}cm ・ {sqm}m² ・ {tatami}畳 ・ 回転 {roomRotation}°
+            {roomW}×{roomH}cm ・ {sqm}m² ・ {tatami}畳 ・ 回転 {roomRotation}° ・ {zoom}%
           </div>
 
           {/* Instructions overlay */}
           {furniture.length === 0 && (
             <div style={{
-              position: "absolute", top: 20, right: 20,
+              position: "absolute", top: 20, right: 60,
               background: "#0D1424CC",
               border: "1px solid #1E2A42",
               borderRadius: 8, padding: "12px 18px",
               fontSize: 12, color: "#6B7A99",
               maxWidth: 220, lineHeight: 1.6,
               backdropFilter: "blur(8px)",
+              zIndex: 30,
             }}>
               左のパネルから家具を追加し、ドラッグで配置してください。家具をクリックして選択・回転・削除ができます。
             </div>
